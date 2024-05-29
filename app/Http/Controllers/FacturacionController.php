@@ -43,19 +43,21 @@ class FacturacionController extends Controller
         }
         return response()->json(['status' => $status]);
     }
+	
+	
 
-
-    public function data_print_invoice($nro_factura = Null, $tipo_documento = Null)
+  public function data_print_invoice($nro_factura = Null, $tipo_documento = Null, $caja_id = Null)
     {
-        $venta = Venta::where('nro_factura', $nro_factura)->where('tipo_doc', $tipo_documento)->first();
+
+		$venta = Venta::where('nro_factura', $nro_factura)->where('tipo_doc', $tipo_documento)->where('id_caja', $caja_id)->first();
         $cliente = Cliente::find($venta->id_cliente);
 
         $empresa1 = Empresa::find($venta->id_empresa);
         $empresa2 = "";
-        $detalles1 = Ventadetalle::leftJoin('producto', 'producto.pro_id', '=', 'venta_detalle.id_producto')
+ 
+		$detalles1 = Ventadetalle::leftJoin('producto', 'producto.pro_id', '=', 'venta_detalle.id_producto')
             ->select('producto.pro_grabaiva as pro_grabaiva', 'producto.pro_nombre as pro_nombre', 'venta_detalle.*')
             ->where('id_venta', $venta->id_venta)->get();
-
         // }
 
         $subtotalsiniva12 = 0;
@@ -90,18 +92,23 @@ class FacturacionController extends Controller
         if ($caja_id == 1) {
             $almacen = 1;
         } else {
-            $almacen = 2;
+            $almacen = 1;
         }
         $code = $request->code;
 
-        $product = Product::join("almapro", "almapro.id_pro", "=", "producto.pro_id")
-            ->select("producto.*", "almapro.existencia as existencia", "almapro.id_alm as almacen_id")
-            ->where("id_alm", $almacen)->where("pro_codigobarra", $code)
-            ->orWhere(function (Builder $query) use ($almacen, $code) {
-                $query->where("id_alm", $almacen)->where("pro_codigoauxiliar", $code);
-            })
-            ->with("precios")
-            ->first();
+$product = Product::join("almapro", "almapro.id_pro", "=", "producto.pro_id")
+    ->select("producto.*", "almapro.existencia as existencia", "almapro.id_alm as almacen_id")
+    ->where("id_alm", $almacen)
+    ->where("pro_codigobarra", $code)
+    ->orWhere(function (Builder $query) use ($almacen, $code) {
+        $query->where("id_alm", $almacen)
+            ->where("pro_codigoauxiliar", $code);
+    })
+    ->with(['precios' => function ($query) {
+        // Realizar la manipulación adicional aquí
+        $query->selectRaw('*, ROUND(monto * 1.12, 2) as monto');
+    }])
+    ->first();
 
         if ($product == Null) {
             return response()->json(['result' => 'not exist']);
@@ -120,7 +127,7 @@ class FacturacionController extends Controller
             if ($request->tipo_documento == 2) {
                 $punto_1 = "001-010-";
                 $punto_2 = "000000001";
-                $last_venta = Venta::where('tipo_doc', 2)->where('id_caja', 1)->orderBy('id_venta', 'desc')->get()->first();
+                $last_venta = Venta::where('tipo_doc', 2)->where('id_caja', $request->caja_id)->orderBy('id_venta', 'desc')->get()->first();
                 if ($last_venta) {
                     $length = 9;
                     $punto_2 = substr($last_venta->nro_factura, -$length);
@@ -133,7 +140,7 @@ class FacturacionController extends Controller
             } else {
                 $tipodocstring = "NOTA DE VENTA";
                 $punto_2 = "000000001";
-                $last_venta = Venta::where('tipo_doc', 1)->where('id_caja', 1)->orderBy('id_venta', 'desc')->get()->first();
+                $last_venta = Venta::where('tipo_doc', 1)->where('id_caja', $request->caja_id)->orderBy('id_venta', 'desc')->get()->first();
                 if ($last_venta) {
                     $length = 9;
 
@@ -144,12 +151,12 @@ class FacturacionController extends Controller
                     $numerofa = $punto_2;
                 }
             }
-        } else if ($caja_id == 10) {
+        } else if ($caja_id != 1) {
             if ($request->tipo_documento == 2) {
                 $tipodocstring = "FACTURA DE VENTA";
-                $punto_1 = "002-011-";
+                $punto_1 = "001-100-";
                 $punto_2 = "000000001";
-                $last_venta = Venta::where('tipo_doc', 2)->where('id_caja', 10)->orderBy('id_venta', 'desc')->get()->first();
+                $last_venta = Venta::where('tipo_doc', 2)->where('id_caja', $request->caja_id)->orderBy('id_venta', 'desc')->get()->first();
                 if ($last_venta) {
                     $length = 9;
                     $punto_2 = substr($last_venta->nro_factura, -$length);
@@ -162,7 +169,7 @@ class FacturacionController extends Controller
             } else {
                 $tipodocstring = "NOTA DE VENTA";
                 $punto_2 = "000000001";
-                $last_venta = Venta::where('tipo_doc', 1)->where('id_caja', 10)->orderBy('id_venta', 'desc')->get()->first();
+                $last_venta = Venta::where('tipo_doc', 1)->where('id_caja', $request->caja_id)->orderBy('id_venta', 'desc')->get()->first();
                 if ($last_venta) {
                     $length = 9;
 
@@ -180,9 +187,9 @@ class FacturacionController extends Controller
         if ($caja_id == 1) {
             $punto = 1;
             $sucursal = 1;
-        } else if ($caja_id == 10) {
-            $punto = 10;
-            $sucursal = 2;
+        } else if ($caja_id != 1) {
+            $punto = 1;
+            $sucursal = 1;
         }
 
         $id_vendedor = 18;
@@ -404,7 +411,8 @@ class FacturacionController extends Controller
 
         }
 
-        $facturaprint = $this->data_print_invoice($venta->nro_factura, $request->tipo_documento);
+      
+		   $facturaprint = $this->data_print_invoice($venta->nro_factura, $request->tipo_documento,  $request->caja_id);
         $formapago = "";
         // formas de pago
         return response()->json(['result' => 'ok', 'message' => 'Documento pagado con éxito.', 'nro_factura' => $venta->nro_factura, "cancel_payment" => $formapago, "formasdepago" => $request->formasdepago, 'facturaprint' => $facturaprint]);
@@ -424,7 +432,7 @@ class FacturacionController extends Controller
         if ($caja_id == 1) {
             $almacen = 1;
         } else {
-            $almacen = 2;
+            $almacen = 1;
         }
 
         $precios = Precio::get();
